@@ -83,25 +83,23 @@ app.post("/api/users", function (req, res) {
   });
 });
 
-app.post("/api/users/:uid/exercises", function (req, res) {
-  try {
-    if (isNaN(req.params.uid) || !req.params.uid) {
-      throw new Error("User Id is not a number.");
-    }
-    if (!req.body.description.trim()) {
-      throw new Error("Description is required.");
-    }
-    if (isNaN(req.body.duration)) {
-      throw new Error("Duration is required as number of digits.");
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/gm.test(req.body.date) && req.body.date) {
-      throw new Error("Wrong date format.");
-    }
-  } catch (error) {
-    res.status(400).send(error.message);
+app.post("/api/users/*/exercises", function (req, res) {
+  const uid = req.params[0];
+  if (isNaN(uid) || !uid) {
+    return res.status(400).send("User Id is not a number or is missing.");
+  }
+  if (!req.body.description.trim()) {
+    return res.status(400).send("Description is required.");
+
+  }
+  if (isNaN(req.body.duration)) {
+    return res.status(400).send("Duration is required as number of digits.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/gm.test(req.body.date) && req.body.date) {
+    return res.status(400).send("Wrong date format.");
   }
 
-  myDB.get(userExistsQuery, req.params.uid, function (err, row) {
+  myDB.get(userExistsQuery, uid, function (err, row) {
     if (!row || err) {
       res.status(400).send(`User does not exist.`);
     } else {
@@ -113,13 +111,13 @@ app.post("/api/users/:uid/exercises", function (req, res) {
       }
       myDB.run(
         insertExcercisesQuery,
-        [req.params.uid, req.body.description, req.body.duration, date],
+        [uid, req.body.description, req.body.duration, date],
         function (err) {
           if (err) {
             res.status(400).send(`Something went wrong. ${err}`);
           }
           res.status(200).send({
-            userId: req.params.uid,
+            userId: uid,
             exerciseId: this.lastID,
             duration: req.body.duration,
             description: req.body.description,
@@ -179,6 +177,7 @@ app.get("/api/users/:uid/logs", function (req, res) {
           return;
         }
       }
+      userLogQuery += " ORDER BY Exercises.date ASC";
       if (req.query.limit && !isNaN(req.query.limit)) {
         params.push(req.query.limit);
         userLogQuery += " LIMIT ?";
