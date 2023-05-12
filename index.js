@@ -14,7 +14,6 @@ const userExistsQuery = `SELECT * FROM Users WHERE user_id = ?`;
 const usernameExistsQuery = `SELECT * FROM Users WHERE username = ?`;
 const insertExcercisesQuery = `INSERT INTO Exercises (user_id, description, duration, date) VALUES(?,?,?,?)`;
 
-
 const myDB = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE, (err) => {
   if (err) return console.error(err.message);
   console.log("DB Connection Successful");
@@ -90,7 +89,6 @@ app.post("/api/users/*/exercises", function (req, res) {
   }
   if (!req.body.description.trim()) {
     return res.status(400).send("Description is required.");
-
   }
   if (isNaN(req.body.duration)) {
     return res.status(400).send("Duration is required as number of digits.");
@@ -178,9 +176,9 @@ app.get("/api/users/:uid/logs", function (req, res) {
         }
       }
       userLogQuery += " ORDER BY Exercises.date ASC";
+      let limit;
       if (req.query.limit && !isNaN(req.query.limit)) {
-        params.push(req.query.limit);
-        userLogQuery += " LIMIT ?";
+        limit = req.query.limit;
       }
       if (req.query.limit && isNaN(req.query.limit)) {
         res.status(400).send(`Limit is not a number`);
@@ -194,7 +192,7 @@ app.get("/api/users/:uid/logs", function (req, res) {
           res.status(200).json({
             User_ID: userData.user_id,
             Username: userData.username,
-            logs: rows,
+            logs: typeof limit === "string" ? rows.slice(0, limit) : rows,
             count: rows.length,
           });
         }
