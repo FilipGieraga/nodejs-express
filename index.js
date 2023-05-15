@@ -1,38 +1,44 @@
-const express = require("express");
-const app = express();
-const cors = require("cors");
-var sqlite3 = require("sqlite3");
-var path = require("path");
+import {
+  createUsersTable,
+  createExercisesTable,
+  userLogQuery,
+  insertUsersQuery,
+  showAllUsers,
+  userExistsQuery,
+  usernameExistsQuery,
+  insertExcercisesQuery,
+} from "./db_handlers/sql_queries.js";
+import {
+  varExistAndIsNumber,
+  varExist,
+  varNotExist,
+  varInputEmpty,
+} from "./validators/validators.js";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+import express from "express";
+import cors from "cors";
+import path from "path";
+import sqlite3 from "sqlite3";
+import bodyParser from "body-parser";
 
+const app = express();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, "mydb.db");
-const bodyParser = require("body-parser");
+
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json({ type: "application/*+json" }));
-
-const insertUsersQuery = `INSERT INTO Users (username) VALUES(?)`;
-const userExistsQuery = `SELECT * FROM Users WHERE user_id = ?`;
-const usernameExistsQuery = `SELECT * FROM Users WHERE username = ?`;
-const insertExcercisesQuery = `INSERT INTO Exercises (user_id, description, duration, date) VALUES(?,?,?,?)`;
 
 const myDB = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE, (err) => {
   if (err) return console.error(err.message);
   console.log("DB Connection Successful");
 });
 
-myDB.run(`CREATE TABLE IF NOT EXISTS Users (
-	user_id INTEGER PRIMARY KEY ASC,
-	username VARCHAR(40)
-);`);
+myDB.run(createUsersTable);
 
-myDB.run(`CREATE TABLE IF NOT EXISTS Exercises (
-  excercise_id INTEGER PRIMARY KEY ASC,
-  description VARCHAR(50),
-  duration INTEGER,
-  date DATE,
-  user_id INTEGER,
-  FOREIGN KEY (user_id) REFERENCES Users(user_id));`);
+myDB.run(createExercisesTable);
 
-require("dotenv").config();
+dotenv.config();
 
 app.use(cors());
 app.use(express.static("public"));
@@ -42,9 +48,8 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/users", cors(), (req, res, next) => {
-  var sql = "select * from Users";
   var params = [];
-  myDB.all(sql, params, (err, rows) => {
+  myDB.all(showAllUsers, params, (err, rows) => {
     if (err) {
       res.status(400).json({ error: err.message });
     }
@@ -60,9 +65,8 @@ app.get("/api/users", cors(), (req, res, next) => {
 });
 
 app.post("/api/users", function (req, res) {
-  if (!req.body.username.trim()) {
-    res.status(400).send("No username input.");
-    return;
+  if (varInputEmpty(req.body.username)) {
+    return res.status(400).send("No username input.");
   }
   myDB.get(usernameExistsQuery, req.body.username, function (err, userData) {
     if (userData) {
@@ -84,16 +88,16 @@ app.post("/api/users", function (req, res) {
 
 app.post("/api/users/*/exercises", function (req, res) {
   const uid = req.params[0];
-  if (isNaN(uid) || !uid) {
+  if (isNaN(uid) || varNotExist(uid)) {
     return res.status(400).send("User Id is not a number or is missing.");
   }
-  if (!req.body.description.trim()) {
+  if (varInputEmpty(req.body.description)) {
     return res.status(400).send("Description is required.");
   }
-  if (isNaN(req.body.duration)) {
+  if (isNaN(req.body.duration) && varExist(req.body.duration)) {
     return res.status(400).send("Duration is required as number of digits.");
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/gm.test(req.body.date) && req.body.date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/gm.test(req.body.date) && varExist(req.body.date)) {
     return res.status(400).send("Wrong date format.");
   }
 
@@ -128,20 +132,10 @@ app.post("/api/users/*/exercises", function (req, res) {
 });
 
 app.get("/api/users/:uid/logs", function (req, res) {
-  let userLogQuery = `
-		SELECT
-			Exercises.excercise_id AS "Excercise_ID",
-			Exercises.description AS "Description",
-			Exercises.duration AS "Duration",
-			Exercises.date AS "Date"
-		FROM
-			Users	RIGHT JOIN Exercises ON
-      (Users.user_id = Exercises.user_id)
-    WHERE  Users.user_id = ?`;
+  let userLog = userLogQuery;
   myDB.get(userExistsQuery, req.params.uid, function (err, userData) {
     if (!userData || err) {
-      res.status(400).send(`User does not exist.`);
-      return;
+      return res.status(400).send(`User does not exist.`);
     } else {
       let params = [req.params.uid];
       if (req.query.from && req.query.to) {
@@ -151,7 +145,7 @@ app.get("/api/users/:uid/logs", function (req, res) {
           )
         ) {
           params.push(req.query.from, req.query.to);
-          userLogQuery += " AND Exercises.date BETWEEN ? AND ?";
+          userLog += " AND Exercises.date BETWEEN ? AND ?";
         } else {
           res.status(400).send(`Wrong date(s) format. Try YYYY-MM-DD`);
           return;
@@ -160,7 +154,7 @@ app.get("/api/users/:uid/logs", function (req, res) {
       if (req.query.from && !req.query.to) {
         if (/^\d{4}-\d{2}-\d{2}$/gm.test(req.query.from)) {
           params.push(req.query.from);
-          userLogQuery += " AND Exercises.date >= ?";
+          userLog += " AND Exercises.date >= ?";
         } else {
           res.status(400).send(`Wrong date(s) format. Try YYYY-MM-DD`);
           return;
@@ -169,25 +163,23 @@ app.get("/api/users/:uid/logs", function (req, res) {
       if (!req.query.from && req.query.to) {
         if (/^\d{4}-\d{2}-\d{2}$/gm.test(req.query.to)) {
           params.push(req.query.to);
-          userLogQuery += " AND Exercises.date <= ?";
+          userLog += " AND Exercises.date <= ?";
         } else {
           res.status(400).send(`Wrong date(s) format. Try YYYY-MM-DD`);
           return;
         }
       }
-      userLogQuery += " ORDER BY Exercises.date ASC";
+      userLog += " ORDER BY Exercises.date ASC";
       let limit;
-      if (req.query.limit && !isNaN(req.query.limit)) {
+      if (varExistAndIsNumber(req.query.limit)) {
         limit = req.query.limit;
       }
-      if (req.query.limit && isNaN(req.query.limit)) {
-        res.status(400).send(`Limit is not a number`);
-        return;
+      if (isNaN(req.query.limit) && varExist(req.query.limit)) {
+        return res.status(400).send(`Limit is not a number`);
       }
-      myDB.all(userLogQuery, params, function (err, rows) {
+      myDB.all(userLog, params, function (err, rows) {
         if (err) {
-          res.status(400).send(`Something went wrong.`);
-          return;
+          return res.status(400).send(`Something went wrong.`);
         } else {
           res.status(200).json({
             User_ID: userData.user_id,
